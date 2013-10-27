@@ -3,13 +3,10 @@
 import logging as log
 import sys
 from optparse import OptionParser
+from ipam import ipam 
 
 loglevel=log.DEBUG
 #loglevel=log.INFO
-logfile="/home/madmin/python-examples/logging/example.log"
-
-dump   = lambda x: log.info( "dump({})".format(x) )
-initdb = lambda x: (log.info( "initdb()" ) , 1/x )
 
 def init():
     p = OptionParser(usage="usage: %prog [options]")
@@ -30,31 +27,42 @@ def init():
     return options
 
 def main():
-    options = init()
-
+    #options = init()
+    BaseNetwork = { "ipsec-unlimited":"10.210.0.0/16", "ipsec-restricted":"10.211.0.0/16", "sslvpn":"10.211.0.0/16" }
+    print("Hello World")
     try:
         for data in sys.stdin:
+            log.info("received data: {}".format(data))    
             data = data.split()
-            msg = "received data: {}".format(data)
-            log.info(msg)    
             func = data[0]
-            args = data[1:]
-
-            if func == "dump": return dump(args)
-            if func == "init": return initdb(int(args[0]))
-            raise RuntimeError("illegal function called: " + func )
-            return 1
+            root = data[1]
+            args = data[2:]
+            if root in BaseNetwork: 
+                db   = ipam(root + ".sqlite3")
+                root = BaseNetwork[root] 
+            else:
+                print("unknown root network {}".format(root))
+                        
+            result = "not implemented"
+            if func == "init":          result = db.init_db(root)    
+            if func == "dump":          result = db.dump(("net_frag",))
+            if func == "alloc_net":     result = db.alloc_net(int(args[0]))[1]
+            if func == "free_net":      result = db.free_net(args[0])[3:]
+            
+            if result == "not implemented": raise RuntimeError("{} not implemented".format(func))
+            log.info("{} => {}".format(data,result))
+            print("ok {}".format(result))
+            return 0
                         
     except Exception as ex:
         log.exception(ex)
-        print(ex)
-        # raise
-        return 1
-    else:
-        log.info("alles ok")
-        return 0
-    finally:
-        print('In finally block for cleanup')
+        print("error {}".format(ex))
+        return 99
 
+    
 if __name__ == '__main__':
+    log.basicConfig(
+        filename="ipam.log", level=loglevel,
+        format = '%(asctime)s %(levelname)s\t%(message)s', datefmt='%Y-%m-%d/%H:%M:%S' )
+    [ log.error("... START ...") for i in range(27) ]
     sys.exit(main())

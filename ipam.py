@@ -32,13 +32,17 @@ class ipamError(Exception):
 
 class ipam:
     @dump_args()
-    def __init__(self, db = DB_NAME ):
+    def __init__(self, db=DB_NAME ):
         self.conn = sqlite3.connect(db)
         self.cur  = self.conn.cursor()
-        self.init_db()
-    
+        #self.init_db()
+        try:
+            self.get_root()
+        except:
+            pass
+            
     @dump_args()    
-    def init_db(self):
+    def init_db(self,root):
         try:
             self.cur.execute('''Drop Table if exists net_root''')
             self.cur.execute('''Create Table net_root( key integer primary key, net text, first text, last text, prefix integer )''')
@@ -48,6 +52,9 @@ class ipam:
 
             self.cur.execute('''Drop Table if exists ip_addr''')
             self.cur.execute('''Create Table ip_addr( key integer primary key, ip text, net_frag_key integer)''')
+            
+            self.add_root(root)
+            self.get_root()
             
         except:
             raise
@@ -60,6 +67,7 @@ class ipam:
             self.cur.execute('SELECT count(*) FROM net_root')
             if self.cur.fetchone()[0] != 0: 
                 raise ipamError("only one root allowed")
+            net = ip_network(net)
             first = str(net[0])
             last  = str(net[-1])
             p     = prefix(net)
@@ -193,6 +201,7 @@ class ipam:
             if p != prefix(net):
                 raise ipamError("free_net internal error, Database corrupted" )
             self.cur.execute('UPDATE net_frag SET alloc=0 WHERE key=?',(key,) )
+            self.conn.commit()
             self.merge_net(net)
             return "ok " + net + " is free"
 
@@ -313,14 +322,14 @@ class ipam:
 if __name__ == "__main__":
     import random    
     loglevel=log.DEBUG
-    loglevel=log.INFO
+    #loglevel=log.INFO
     log.basicConfig(
         filename="ipam.log", level=loglevel,
         format = '%(asctime)s %(levelname)s\t%(message)s', datefmt='%Y-%m-%d/%H:%M:%S' )
     [ log.error("... START ...") for i in range(27) ]
     try:
-        db = ipam()    
-        db.add_root(ip_network('10.200.0.0/16'))
+        db = ipam()
+        db.init_db('10.200.0.0/16')    
         #db.add_root(ip_network('2001:0db8:1234::/48'))
         db.get_root()
         db.dump( ("net_frag",) )
