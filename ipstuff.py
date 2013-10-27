@@ -15,6 +15,7 @@ def net_bits(ip):
     if n == 0: return bits(ip)
     for p in range(bits(ip),0,-1):
         if n & 1 == 1 : return p
+        
         n = n >> 1
         
 # ein Netz kann entweder mit seinem (gleichgrossen) Vorgänger oder Nachfolger (sibling) zu einem doppelt so grossen 

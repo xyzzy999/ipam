@@ -47,7 +47,7 @@ class ipam:
             self.cur.execute('''Create Table net_frag( key integer primary key, net text, prefix integer, alloc bool)''')
 
             self.cur.execute('''Drop Table if exists ip_addr''')
-            self.cur.execute('''Create Table ip_addr( key integer primary key, ip text, alloc bool, net_frag_key integer)''')
+            self.cur.execute('''Create Table ip_addr( key integer primary key, ip text, net_frag_key integer)''')
             
         except:
             raise
@@ -171,7 +171,7 @@ class ipam:
             sib = sibling(net) 
             self.cur.execute('SELECT count(*) FROM net_frag WHERE (net=? OR net=?) AND alloc=0', (str(sib[0]), str(sib[1]),) )
             (n,) =  self.cur.fetchone()
-            log.debug( "merge_net -------------- sib={} n={}".format(sib, n) )
+            #log.debug( "merge_net -------------- sib={} n={}".format(sib, n) )
             if n != 2: 
                 return "ok nothing to merge" 
             big = merge(sib) 
@@ -201,6 +201,94 @@ class ipam:
             
         except:
             raise
+    
+    @dump_args("debug") 
+    def _net2key(self, net):
+        try:
+            self.cur.execute('SELECT key FROM net_frag WHERE net=? AND alloc=1', (net,) )
+            (key,) = self.cur.fetchone()
+            return key
+        except TypeError:
+            raise ipamError("count_ip " + str(net) + ": net not allocated" )
+    
+    @dump_args("debug") 
+    def _is_allocated_ip(self, ip):
+        try:
+            self.cur.execute('SELECT count(*) from ip_addr WHERE ip=? ',(str(ip),) )
+            (hits,) = self.cur.fetchone()
+            if( hits == 1):
+                self.cur.execute('SELECT key from ip_addr WHERE ip=?', (str(ip),) )
+                (ip_key,) = self.cur.fetchone()
+                return ip_key
+            elif (hits == 0):
+                return -1
+            else:
+                raise ipamError("database error: " + str(ip) +" allocated multiple times" )
+        except:
+            raise 
+        
+    @dump_args("debug") 
+    def get_ip(self, net):
+        try:
+            for ip in ip_network(net).iterhosts():
+                if self._is_allocated_ip(ip) == -1:
+                    return ip
+            raise ipamError("get_ip({}) network is full".format(net))
+        
+        except:
+            raise 
+        
+    @dump_args() 
+    def alloc_ip(self, net, ip=None):
+        try:
+            ip = self.get_ip(net) if ip == None else ip
+            net_key = self._net2key(net)
+            if self._is_allocated_ip(ip) == -1: 
+                self.cur.execute('INSERT INTO ip_addr (ip, net_frag_key) VALUES (?,?)', (str(ip), net_key) )
+                return ip
+            else:
+                raise ipamError("alloc_ip({}) IP already allocated".format(ip))
+        except:
+            raise 
+        
+    @dump_args() 
+    def free_ip(self, ip):
+        try:
+            ip_key = self._is_allocated_ip(ip)
+            if ip_key != -1: 
+                self.cur.execute('DELETE from ip_addr WHERE key=?', (ip_key,) )
+            else:
+                raise ipamError("free_ip({}) ip not allocated".format(ip))
+        except:
+            raise     
+        
+    @dump_args() 
+    def count_ip(self, net, alloc=False):
+        net_key = self._net2key(net)
+        try:   
+            self.cur.execute('SELECT count(*) FROM ip_addr WHERE net_frag_key=?', (net_key,))
+            (alloc_count,) = self.cur.fetchone()
+            return alloc_count if alloc == True else ip_network(net).numhosts-alloc_count
+        except:
+            raise     
+    
+    @dump_args() 
+    def list_ip(self, net, alloc=False, nmax=-1):
+        net_key = self._net2key(net)
+        try:
+            if alloc == False:
+                ip_list = [ ip for ip in ip_network(net).iterhosts() if self._is_allocated_ip(ip) == -1 ]
+            else:
+                ip_list = [ ip for ip in ip_network(net).iterhosts() if self._is_allocated_ip(ip) != -1 ] 
+            
+            if nmax == -1:
+                return ip_list
+            
+            nmax = min(nmax,len(ip_list))
+            return ip_list[:nmax]
+        
+        except:
+            raise     
     
     @dump_args() 
     def dump(self,what=( "net_root", "net_frag", "ip_addr") ):
@@ -237,15 +325,41 @@ if __name__ == "__main__":
         db.get_root()
         db.dump( ("net_frag",) )
         
-#         n = 24
-#         n1 = db.alloc_net(n)[1]
-#         n2 = db.alloc_net(n)[1]
-#         db.dump(("net_frag",))
-#         
-#         db.free_net(n1)
-#         db.dump(("net_frag",))
-#         db.free_net(n2)
-#         db.dump(("net_frag",))
+        n = 23
+        n1 = db.alloc_net(n)[1]
+        n2 = db.alloc_net(n)[1]
+        db.dump(("net_frag",))
+         
+        print("n1=",n1)
+        print("allocated_hosts=",db.count_ip(n1,True))
+        print("free hosts=",db.count_ip(n1))
+        
+        for i in range(9): print("allocate ip=", db.alloc_ip(n1))
+        print("list_ip",db.list_ip(n1))   
+        print("list_ip",db.list_ip(n1,nmax=5))
+        print("list_ip",db.list_ip(n1,alloc=True))  
+        print("allocated_hosts=",db.count_ip(n1,True))
+        print("free hosts=",db.count_ip(n1))
+        db.free_ip("10.200.0.4")
+        db.free_ip("10.200.0.6")
+        print("allocated_hosts=",db.count_ip(n1,True))
+        print("free hosts=",db.count_ip(n1))
+        print("list_ip",db.list_ip(n1,alloc=True))  
+        #db.free_ip("10.200.0.6")
+        
+           
+        ip1 = "10.200.0.3"
+        print("allocate ip=", db.alloc_ip(n1,ip1))
+        print("allocate ip=", db.alloc_ip(n1,ip1))
+        
+        
+        
+        raise 
+         
+        db.free_net(n1)
+        db.dump(("net_frag",))
+        db.free_net(n2)
+        db.dump(("net_frag",))
             
         rangelist = [ random.randint(29,30) for i in range(50) ]
         print( rangelist )
