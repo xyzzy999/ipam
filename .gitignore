@@ -1,7 +1,0 @@
-*.bak
-*.pyc
-__pycache__/*
-old/*
-ipam.log
-.project
-.settings/*
